@@ -61,6 +61,10 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) Shutdown() error {
+	if s.httpServer == nil {
+		return nil // Server was never started
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return s.httpServer.Shutdown(ctx)

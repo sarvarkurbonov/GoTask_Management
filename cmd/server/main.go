@@ -77,9 +77,25 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
+	// Handle force quit (second Ctrl+C)
+	forceQuit := make(chan os.Signal, 1)
+	signal.Notify(forceQuit, syscall.SIGINT, syscall.SIGTERM)
+
+	// Ensure we stop listening for signals when done
+	defer signal.Stop(quit)
+	defer signal.Stop(forceQuit)
+
 	select {
 	case <-quit:
 		log.Println("🛑 Shutdown signal received...")
+
+		// Start listening for second signal for force quit
+		go func() {
+			<-forceQuit
+			log.Println("🚨 Force quit signal received, exiting immediately!")
+			os.Exit(1)
+		}()
+
 	case <-ctx.Done():
 		log.Println("🛑 Context cancelled...")
 	}
@@ -89,17 +105,29 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
-	if err := server.Shutdown(); err != nil {
-		log.Printf("⚠️ Error during server shutdown: %v", err)
-	}
+	// Create a channel to signal when shutdown is complete
+	shutdownComplete := make(chan error, 1)
+
+	go func() {
+		shutdownComplete <- server.Shutdown()
+	}()
 
 	// Wait for shutdown to complete or timeout
-	<-shutdownCtx.Done()
-	if shutdownCtx.Err() == context.DeadlineExceeded {
-		log.Println("⚠️ Shutdown timeout exceeded")
+	select {
+	case err := <-shutdownComplete:
+		if err != nil {
+			log.Printf("⚠️ Error during server shutdown: %v", err)
+			os.Exit(1)
+		} else {
+			log.Println("✅ Server stopped gracefully")
+		}
+	case <-shutdownCtx.Done():
+		log.Println("⚠️ Shutdown timeout exceeded, forcing exit")
+		os.Exit(1)
 	}
 
-	log.Println("✅ Server stopped gracefully")
+	// Final cleanup
+	log.Println("🏁 Application shutdown complete")
 }
 
 // setupConfig initializes Viper configuration with enhanced defaults
