@@ -1,0 +1,337 @@
+package storage
+
+import (
+	"context"
+	"os"
+	"testing"
+	"time"
+
+	"GoTask_Management/internal/models"
+	"go.mongodb.org/mongo-driver/bson"
+)
+
+func TestMongoDBStorage(t *testing.T) {
+	// Skip if MongoDB is not available
+	if os.Getenv("MONGODB_TEST_URI") == "" {
+		t.Skip("MongoDB test skipped: MONGODB_TEST_URI not set")
+	}
+
+	config := MongoDBConfig{
+		URI:            getEnvOrDefault("MONGODB_TEST_URI", "mongodb://localhost:27017"),
+		Database:       getEnvOrDefault("MONGODB_TEST_DB", "gotask_test"),
+		Collection:     "tasks_test",
+		ConnectTimeout: 10 * time.Second,
+		QueryTimeout:   5 * time.Second,
+	}
+
+	storage, err := NewMongoDBStorage(config)
+	if err != nil {
+		t.Fatalf("Failed to create MongoDB storage: %v", err)
+	}
+	defer storage.Close()
+
+	// Clean up before tests
+	cleanupMongoDB(t, storage)
+
+	// Run storage compliance tests
+	testStorageCompliance(t, storage)
+}
+
+func TestMongoDBStorage_AdditionalMethods(t *testing.T) {
+	// Skip if MongoDB is not available
+	if os.Getenv("MONGODB_TEST_URI") == "" {
+		t.Skip("MongoDB test skipped: MONGODB_TEST_URI not set")
+	}
+
+	config := MongoDBConfig{
+		URI:            getEnvOrDefault("MONGODB_TEST_URI", "mongodb://localhost:27017"),
+		Database:       getEnvOrDefault("MONGODB_TEST_DB", "gotask_test"),
+		Collection:     "tasks_test",
+		ConnectTimeout: 10 * time.Second,
+		QueryTimeout:   5 * time.Second,
+	}
+
+	storage, err := NewMongoDBStorage(config)
+	if err != nil {
+		t.Fatalf("Failed to create MongoDB storage: %v", err)
+	}
+	defer storage.Close()
+
+	// Clean up before tests
+	cleanupMongoDB(t, storage)
+
+	t.Run("GetTasksByStatus", func(t *testing.T) {
+		// Create test tasks
+		task1 := createTestTask("mongo_status_1", "Task 1", false)
+		task2 := createTestTask("mongo_status_2", "Task 2", true)
+		task3 := createTestTask("mongo_status_3", "Task 3", false)
+
+		err := storage.Create(task1)
+		if err != nil {
+			t.Fatalf("Failed to create task1: %v", err)
+		}
+		err = storage.Create(task2)
+		if err != nil {
+			t.Fatalf("Failed to create task2: %v", err)
+		}
+		err = storage.Create(task3)
+		if err != nil {
+			t.Fatalf("Failed to create task3: %v", err)
+		}
+
+		// Test getting done tasks
+		doneTasks, err := storage.GetTasksByStatus(true)
+		if err != nil {
+			t.Fatalf("Failed to get done tasks: %v", err)
+		}
+		if len(doneTasks) != 1 {
+			t.Errorf("Expected 1 done task, got %d", len(doneTasks))
+		}
+
+		// Test getting undone tasks
+		undoneTasks, err := storage.GetTasksByStatus(false)
+		if err != nil {
+			t.Fatalf("Failed to get undone tasks: %v", err)
+		}
+		if len(undoneTasks) != 2 {
+			t.Errorf("Expected 2 undone tasks, got %d", len(undoneTasks))
+		}
+	})
+
+	t.Run("GetTasksDueBefore", func(t *testing.T) {
+		now := time.Now()
+		yesterday := now.Add(-24 * time.Hour)
+		tomorrow := now.Add(24 * time.Hour)
+
+		// Create tasks with different due dates
+		task1 := createTestTaskWithDueDate("mongo_due_1", "Overdue Task", &yesterday)
+		task2 := createTestTaskWithDueDate("mongo_due_2", "Future Task", &tomorrow)
+		task3 := createTestTask("mongo_due_3", "No Due Date", false)
+
+		err := storage.Create(task1)
+		if err != nil {
+			t.Fatalf("Failed to create task1: %v", err)
+		}
+		err = storage.Create(task2)
+		if err != nil {
+			t.Fatalf("Failed to create task2: %v", err)
+		}
+		err = storage.Create(task3)
+		if err != nil {
+			t.Fatalf("Failed to create task3: %v", err)
+		}
+
+		// Get tasks due before now
+		dueTasks, err := storage.GetTasksDueBefore(now)
+		if err != nil {
+			t.Fatalf("Failed to get due tasks: %v", err)
+		}
+		if len(dueTasks) != 1 {
+			t.Errorf("Expected 1 due task, got %d", len(dueTasks))
+		}
+		if dueTasks[0].ID != "mongo_due_1" {
+			t.Errorf("Expected overdue task, got %s", dueTasks[0].ID)
+		}
+	})
+
+	t.Run("CountMethods", func(t *testing.T) {
+		// Clean up first
+		cleanupMongoDB(t, storage)
+
+		now := time.Now()
+		yesterday := now.Add(-24 * time.Hour)
+
+		// Create test tasks
+		task1 := createTestTask("mongo_count_1", "Task 1", false)
+		task2 := createTestTask("mongo_count_2", "Task 2", true)
+		task3 := createTestTaskWithDueDate("mongo_count_3", "Overdue Task", &yesterday)
+
+		err := storage.Create(task1)
+		if err != nil {
+			t.Fatalf("Failed to create task1: %v", err)
+		}
+		err = storage.Create(task2)
+		if err != nil {
+			t.Fatalf("Failed to create task2: %v", err)
+		}
+		err = storage.Create(task3)
+		if err != nil {
+			t.Fatalf("Failed to create task3: %v", err)
+		}
+
+		// Test total count
+		totalCount, err := storage.GetTasksCount()
+		if err != nil {
+			t.Fatalf("Failed to get total count: %v", err)
+		}
+		if totalCount != 3 {
+			t.Errorf("Expected total count 3, got %d", totalCount)
+		}
+
+		// Test done count
+		doneCount, err := storage.GetTasksCountByStatus(true)
+		if err != nil {
+			t.Fatalf("Failed to get done count: %v", err)
+		}
+		if doneCount != 1 {
+			t.Errorf("Expected done count 1, got %d", doneCount)
+		}
+
+		// Test undone count
+		undoneCount, err := storage.GetTasksCountByStatus(false)
+		if err != nil {
+			t.Fatalf("Failed to get undone count: %v", err)
+		}
+		if undoneCount != 2 {
+			t.Errorf("Expected undone count 2, got %d", undoneCount)
+		}
+
+		// Test overdue count
+		overdueCount, err := storage.GetOverdueTasksCount()
+		if err != nil {
+			t.Fatalf("Failed to get overdue count: %v", err)
+		}
+		if overdueCount != 1 {
+			t.Errorf("Expected overdue count 1, got %d", overdueCount)
+		}
+	})
+
+	t.Run("HealthCheck", func(t *testing.T) {
+		err := storage.HealthCheck()
+		if err != nil {
+			t.Errorf("Health check failed: %v", err)
+		}
+	})
+
+	t.Run("Indexes", func(t *testing.T) {
+		// Test that indexes were created
+		collection := storage.GetCollection()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		cursor, err := collection.Indexes().List(ctx)
+		if err != nil {
+			t.Fatalf("Failed to list indexes: %v", err)
+		}
+		defer cursor.Close(ctx)
+
+		var indexes []bson.M
+		if err := cursor.All(ctx, &indexes); err != nil {
+			t.Fatalf("Failed to decode indexes: %v", err)
+		}
+
+		// Should have at least the default _id index plus our custom indexes
+		if len(indexes) < 2 {
+			t.Errorf("Expected at least 2 indexes, got %d", len(indexes))
+		}
+	})
+
+	t.Run("UTF8Support", func(t *testing.T) {
+		// Test UTF-8 characters including emojis
+		task := createTestTask("mongo_utf8", "Task with UTF-8: 你好 🚀 ñáéíóú", false)
+		
+		err := storage.Create(task)
+		if err != nil {
+			t.Fatalf("Failed to create UTF-8 task: %v", err)
+		}
+
+		retrievedTask, err := storage.GetByID("mongo_utf8")
+		if err != nil {
+			t.Fatalf("Failed to get UTF-8 task: %v", err)
+		}
+
+		if retrievedTask.Title != task.Title {
+			t.Errorf("UTF-8 title not preserved: expected %s, got %s", task.Title, retrievedTask.Title)
+		}
+	})
+
+	t.Run("LargeDocuments", func(t *testing.T) {
+		// Test with large title (MongoDB supports up to 16MB documents)
+		largeTitle := string(make([]byte, 10000))
+		for i := range largeTitle {
+			largeTitle = largeTitle[:i] + "a" + largeTitle[i+1:]
+		}
+
+		task := createTestTask("mongo_large", largeTitle, false)
+		
+		err := storage.Create(task)
+		if err != nil {
+			t.Fatalf("Failed to create large task: %v", err)
+		}
+
+		retrievedTask, err := storage.GetByID("mongo_large")
+		if err != nil {
+			t.Fatalf("Failed to get large task: %v", err)
+		}
+
+		if retrievedTask.Title != task.Title {
+			t.Error("Large title not preserved")
+		}
+	})
+}
+
+func TestMongoDBStorage_ErrorCases(t *testing.T) {
+	t.Run("InvalidConnection", func(t *testing.T) {
+		config := MongoDBConfig{
+			URI:            "mongodb://invalid-host:27017",
+			Database:       "test",
+			Collection:     "tasks",
+			ConnectTimeout: 1 * time.Second,
+			QueryTimeout:   1 * time.Second,
+		}
+
+		_, err := NewMongoDBStorage(config)
+		if err == nil {
+			t.Error("Expected error for invalid connection, got nil")
+		}
+	})
+
+	t.Run("DuplicateID", func(t *testing.T) {
+		// Skip if MongoDB is not available
+		if os.Getenv("MONGODB_TEST_URI") == "" {
+			t.Skip("MongoDB test skipped: MONGODB_TEST_URI not set")
+		}
+
+		config := MongoDBConfig{
+			URI:            getEnvOrDefault("MONGODB_TEST_URI", "mongodb://localhost:27017"),
+			Database:       getEnvOrDefault("MONGODB_TEST_DB", "gotask_test"),
+			Collection:     "tasks_test_dup",
+			ConnectTimeout: 10 * time.Second,
+			QueryTimeout:   5 * time.Second,
+		}
+
+		storage, err := NewMongoDBStorage(config)
+		if err != nil {
+			t.Fatalf("Failed to create MongoDB storage: %v", err)
+		}
+		defer storage.Close()
+
+		cleanupMongoDB(t, storage)
+
+		// Create first task
+		task1 := createTestTask("duplicate_id", "Task 1", false)
+		err = storage.Create(task1)
+		if err != nil {
+			t.Fatalf("Failed to create first task: %v", err)
+		}
+
+		// Try to create task with same ID
+		task2 := createTestTask("duplicate_id", "Task 2", false)
+		err = storage.Create(task2)
+		if err == nil {
+			t.Error("Expected error for duplicate ID, got nil")
+		}
+	})
+}
+
+func cleanupMongoDB(t *testing.T, storage *MongoDBStorage) {
+	// Delete all documents for clean test environment
+	collection := storage.GetCollection()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := collection.DeleteMany(ctx, bson.D{})
+	if err != nil {
+		t.Logf("Warning: Failed to cleanup MongoDB: %v", err)
+	}
+}

@@ -1,0 +1,184 @@
+# Variables
+APP_NAME := gotask
+CLI_BINARY := bin/gotask
+SERVER_BINARY := bin/gotask-server
+GO := go
+GOFLAGS := -v
+
+# Version info
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "1.0.0")
+BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+LDFLAGS := -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.GitCommit=$(GIT_COMMIT) -w -s
+
+.PHONY: all build clean test run-cli run-server docker docker-compose lint fmt help
+
+# Default target
+all: build
+
+# Build both binaries
+build: build-cli build-server
+
+# Build CLI
+build-cli:
+	@echo "Building CLI..."
+	@mkdir -p bin
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(CLI_BINARY) cmd/cli/main.go
+	@echo "CLI built: $(CLI_BINARY)"
+
+# Build Server
+build-server:
+	@echo "Building Server..."
+	@mkdir -p bin
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(SERVER_BINARY) cmd/server/main.go
+	@echo "Server built: $(SERVER_BINARY)"
+
+# Run CLI
+run-cli:
+	$(GO) run cmd/cli/main.go $(ARGS)
+
+# Run Server
+run-server:
+	$(GO) run cmd/server/main.go
+
+# Run tests
+test:
+	@echo "Running tests..."
+	$(GO) test -v -cover ./...
+
+# Run tests with coverage report
+test-coverage:
+	@echo "Running tests with coverage..."
+	$(GO) test -v -coverprofile=coverage.out ./...
+	$(GO) tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report generated: coverage.html"
+
+# Clean build artifacts
+clean:
+	@echo "Cleaning..."
+	@rm -rf bin/ coverage.out coverage.html
+	@echo "Clean complete"
+
+# Format code
+fmt:
+	@echo "Formatting code..."
+	$(GO) fmt ./...
+	@echo "Formatting complete"
+
+# Lint code
+lint:
+	@echo "Linting code..."
+	@golangci-lint run
+	@echo "Linting complete"
+
+# Install dependencies
+deps:
+	@echo "Installing dependencies..."
+	$(GO) mod download
+	$(GO) mod tidy
+	@echo "Dependencies installed"
+
+# Docker build
+docker:
+	@echo "Building Docker image..."
+	docker build -t $(APP_NAME):$(VERSION) .
+	@echo "Docker image built: $(APP_NAME):$(VERSION)"
+
+# Docker Compose up
+docker-compose:
+	docker-compose up --build
+
+# Docker Compose down
+docker-down:
+	docker-compose down
+
+# Generate Swagger docs
+swagger:
+	@echo "Generating Swagger documentation..."
+	@if command -v swag >/dev/null 2>&1; then \
+		swag init -g cmd/server/main.go -o api/docs; \
+	else \
+		echo "⚠️  swag not installed. Install with: go install github.com/swaggo/swag/cmd/swag@latest"; \
+	fi
+	@echo "Swagger docs generated"
+
+# Storage tests (requires databases)
+test-storage:
+	@echo "🧪 Running storage tests..."
+	@echo "⚠️  Make sure databases are running (docker-compose up -d postgres mysql mongodb)"
+	POSTGRES_TEST_HOST=localhost POSTGRES_TEST_USER=postgres POSTGRES_TEST_PASSWORD=password POSTGRES_TEST_DB=gotask_test \
+	MYSQL_TEST_HOST=localhost MYSQL_TEST_USER=root MYSQL_TEST_PASSWORD=password MYSQL_TEST_DB=gotask_test \
+	MONGODB_TEST_URI=mongodb://localhost:27017 MONGODB_TEST_DB=gotask_test \
+	$(GO) test -v ./internal/storage
+
+# Database management
+db-up:
+	@echo "🗄️ Starting database services..."
+	docker-compose up -d postgres mysql mongodb
+
+db-down:
+	@echo "🗄️ Stopping database services..."
+	docker-compose stop postgres mysql mongodb
+
+# Production deployment
+prod-up:
+	@echo "🚀 Starting production environment..."
+	docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+prod-down:
+	@echo "🛑 Stopping production environment..."
+	docker-compose -f docker-compose.yml -f docker-compose.prod.yml down
+
+# Development environment with all services
+dev-full:
+	@echo "🚀 Starting full development environment..."
+	docker-compose -f docker-compose.yml -f docker-compose.override.yml up --build
+
+# Security scanning
+security-scan:
+	@echo "🔒 Running security scan..."
+	@if command -v gosec >/dev/null 2>&1; then \
+		gosec ./...; \
+	else \
+		echo "⚠️  gosec not installed. Install with: go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest"; \
+	fi
+
+# Help
+help:
+	@echo "GoTask Management - Available commands:"
+	@echo ""
+	@echo "Build targets:"
+	@echo "  make build          - Build both CLI and server"
+	@echo "  make build-cli      - Build CLI only"
+	@echo "  make build-server   - Build server only"
+	@echo ""
+	@echo "Development targets:"
+	@echo "  make run-cli        - Run CLI (use ARGS= for arguments)"
+	@echo "  make run-server     - Run server"
+	@echo "  make docker-compose - Run with Docker Compose"
+	@echo "  make dev-full       - Start full development environment"
+	@echo ""
+	@echo "Testing targets:"
+	@echo "  make test           - Run tests"
+	@echo "  make test-coverage  - Run tests with coverage"
+	@echo "  make test-storage   - Run storage tests (requires databases)"
+	@echo ""
+	@echo "Database targets:"
+	@echo "  make db-up          - Start database services"
+	@echo "  make db-down        - Stop database services"
+	@echo ""
+	@echo "Production targets:"
+	@echo "  make prod-up        - Start production environment"
+	@echo "  make prod-down      - Stop production environment"
+	@echo ""
+	@echo "Code quality targets:"
+	@echo "  make clean          - Clean build artifacts"
+	@echo "  make fmt            - Format code"
+	@echo "  make lint           - Lint code"
+	@echo "  make security-scan  - Run security scan"
+	@echo ""
+	@echo "Utility targets:"
+	@echo "  make deps           - Install dependencies"
+	@echo "  make docker         - Build Docker image"
+	@echo "  make swagger        - Generate Swagger docs"
+	@echo "  make help           - Show this help"

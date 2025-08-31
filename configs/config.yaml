@@ -1,0 +1,109 @@
+# GoTask Management Configuration
+# This file contains the default configuration for the GoTask Management application
+# Environment variables will override these settings
+
+# Server Configuration
+server:
+  port: 8080
+  read_timeout: "15s"
+  write_timeout: "15s"
+  idle_timeout: "60s"
+  shutdown_timeout: "30s"
+
+# Storage Configuration
+# Supported types: json, sqlite, postgres, mysql, mongodb
+storage:
+  type: "json"  # Default storage type
+  path: "tasks.json"  # File path for json/sqlite storage
+
+# Database Configuration (for postgres/mysql)
+database:
+  host: "localhost"
+  port: 5432  # 5432 for postgres, 3306 for mysql
+  name: "gotask"
+  user: "gotask_user"
+  password: ""  # Set via environment variable DB_PASSWORD
+  ssl_mode: "disable"  # postgres: disable, require, verify-ca, verify-full
+  timezone: "UTC"
+
+  # MySQL specific settings
+  charset: "utf8mb4"
+  parse_time: true
+  location: "Local"
+
+  # Connection pool settings
+  max_idle_conns: 10
+  max_open_conns: 100
+  conn_max_lifetime: "1h"
+
+# MongoDB Configuration
+mongodb:
+  uri: "mongodb://localhost:27017"
+  database: "gotask"
+  collection: "tasks"
+  connect_timeout: "10s"
+  query_timeout: "5s"
+
+  # Authentication (if required)
+  username: ""
+  password: ""
+  auth_source: "admin"
+
+# Scheduler Configuration
+scheduler:
+  enabled: true
+  interval: 300  # seconds between cleanup runs
+  cleanup_completed_tasks: true
+  cleanup_after_days: 30  # days to keep completed tasks
+
+# Logging Configuration
+logging:
+  level: "info"  # debug, info, warn, error
+  format: "text"  # text, json
+  output: "stdout"  # stdout, stderr, file
+  file_path: "logs/gotask.log"  # used when output is "file"
+  max_size: 100  # MB
+  max_backups: 3
+  max_age: 28  # days
+  compress: true
+
+# API Configuration
+api:
+  cors:
+    enabled: true
+    allowed_origins: ["*"]
+    allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowed_headers: ["Content-Type", "Authorization"]
+    max_age: 86400  # seconds
+
+  rate_limiting:
+    enabled: false
+    requests_per_minute: 100
+    burst: 10
+
+  request_timeout: "30s"
+  max_request_size: "10MB"
+
+# Monitoring Configuration
+monitoring:
+  metrics:
+    enabled: true
+    path: "/metrics"
+
+  health_check:
+    enabled: true
+    path: "/health"
+    detailed: true  # Include storage health in response
+
+  profiling:
+    enabled: false  # Enable pprof endpoints
+    path: "/debug/pprof"
+
+# Feature Flags
+features:
+  swagger_ui: true
+  admin_endpoints: false
+  bulk_operations: true
+  task_templates: false
+  notifications: false
+  file_attachments: false

@@ -1,0 +1,519 @@
+openapi: 3.0.3
+info:
+  title: GoTask Management API
+  description: |
+    A comprehensive task management system built with Go, featuring multiple storage backends 
+    and a RESTful API for managing tasks with due dates, status tracking, and advanced filtering.
+    
+    ## Features
+    - Full CRUD operations for tasks
+    - Multiple storage backends (PostgreSQL, MySQL, MongoDB, SQLite, JSON)
+    - Task status management (done/undone)
+    - Due date tracking and filtering
+    - Health monitoring
+    - UTF-8 and emoji support
+    
+    ## Authentication
+    Currently, the API does not require authentication. This may be added in future versions.
+    
+    ## Rate Limiting
+    Rate limiting is configurable and disabled by default.
+  version: 1.0.0
+  contact:
+    name: GoTask Management
+    url: https://github.com/your-org/gotask-management
+    email: support@gotask.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Development server
+  - url: https://api.gotask.com
+    description: Production server
+
+tags:
+  - name: tasks
+    description: Task management operations
+  - name: health
+    description: Health check and monitoring
+  - name: admin
+    description: Administrative operations
+
+paths:
+  /api/v1/tasks:
+    get:
+      tags:
+        - tasks
+      summary: Get all tasks
+      description: Retrieve all tasks with optional filtering by status
+      parameters:
+        - name: status
+          in: query
+          description: Filter tasks by completion status
+          required: false
+          schema:
+            type: string
+            enum: [done, undone]
+            example: undone
+        - name: limit
+          in: query
+          description: Maximum number of tasks to return
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+        - name: offset
+          in: query
+          description: Number of tasks to skip
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: List of tasks retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Task'
+              examples:
+                all_tasks:
+                  summary: All tasks
+                  value:
+                    - id: "task-1"
+                      title: "Complete project documentation"
+                      done: false
+                      created_at: "2024-01-15T10:30:00Z"
+                      due_date: "2024-01-20T17:00:00Z"
+                    - id: "task-2"
+                      title: "Review code changes"
+                      done: true
+                      created_at: "2024-01-14T09:15:00Z"
+                      due_date: null
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags:
+        - tasks
+      summary: Create a new task
+      description: Create a new task with title and optional due date
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskRequest'
+            examples:
+              simple_task:
+                summary: Simple task
+                value:
+                  title: "Buy groceries"
+              task_with_due_date:
+                summary: Task with due date
+                value:
+                  title: "Submit quarterly report"
+                  due_date: "2024-01-31T23:59:59Z"
+      responses:
+        '201':
+          description: Task created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/tasks/{id}:
+    get:
+      tags:
+        - tasks
+      summary: Get a specific task
+      description: Retrieve a task by its unique identifier
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the task
+          schema:
+            type: string
+            example: "task-123"
+      responses:
+        '200':
+          description: Task retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags:
+        - tasks
+      summary: Update a task
+      description: Update an existing task's properties
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the task
+          schema:
+            type: string
+            example: "task-123"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskRequest'
+            examples:
+              mark_complete:
+                summary: Mark task as complete
+                value:
+                  title: "Complete project documentation"
+                  done: true
+              update_due_date:
+                summary: Update due date
+                value:
+                  title: "Submit quarterly report"
+                  done: false
+                  due_date: "2024-02-15T17:00:00Z"
+      responses:
+        '200':
+          description: Task updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags:
+        - tasks
+      summary: Delete a task
+      description: Permanently delete a task
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the task
+          schema:
+            type: string
+            example: "task-123"
+      responses:
+        '200':
+          description: Task deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Task deleted successfully"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/tasks/due:
+    get:
+      tags:
+        - tasks
+      summary: Get tasks due soon
+      description: Retrieve tasks that are due within a specified number of days
+      parameters:
+        - name: days
+          in: query
+          description: Number of days to look ahead for due tasks
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+            default: 7
+            example: 3
+      responses:
+        '200':
+          description: Due tasks retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Task'
+              examples:
+                due_tasks:
+                  summary: Tasks due in next 3 days
+                  value:
+                    - id: "task-1"
+                      title: "Submit report"
+                      done: false
+                      created_at: "2024-01-15T10:30:00Z"
+                      due_date: "2024-01-17T17:00:00Z"
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /health:
+    get:
+      tags:
+        - health
+      summary: Health check
+      description: Check the health status of the application and its dependencies
+      responses:
+        '200':
+          description: Application is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                healthy:
+                  summary: Healthy application
+                  value:
+                    status: "healthy"
+                    timestamp: "2024-01-15T10:30:00Z"
+                    version: "1.0.0"
+                    storage:
+                      type: "postgres"
+                      status: "healthy"
+                    uptime: "2h30m15s"
+        '503':
+          description: Application is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                unhealthy:
+                  summary: Unhealthy application
+                  value:
+                    status: "unhealthy"
+                    timestamp: "2024-01-15T10:30:00Z"
+                    version: "1.0.0"
+                    storage:
+                      type: "postgres"
+                      status: "unhealthy"
+                      error: "connection timeout"
+                    uptime: "2h30m15s"
+
+components:
+  schemas:
+    Task:
+      type: object
+      required:
+        - id
+        - title
+        - done
+        - created_at
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the task
+          example: "task-123"
+        title:
+          type: string
+          description: Task title or description
+          minLength: 1
+          maxLength: 1000
+          example: "Complete project documentation"
+        done:
+          type: boolean
+          description: Whether the task is completed
+          example: false
+        created_at:
+          type: string
+          format: date-time
+          description: When the task was created
+          example: "2024-01-15T10:30:00Z"
+        due_date:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the task is due (optional)
+          example: "2024-01-20T17:00:00Z"
+
+    TaskRequest:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          description: Task title or description
+          minLength: 1
+          maxLength: 1000
+          example: "Complete project documentation"
+        done:
+          type: boolean
+          description: Whether the task is completed
+          default: false
+          example: false
+        due_date:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the task is due (optional)
+          example: "2024-01-20T17:00:00Z"
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+          description: Overall health status
+          example: "healthy"
+        timestamp:
+          type: string
+          format: date-time
+          description: When the health check was performed
+          example: "2024-01-15T10:30:00Z"
+        version:
+          type: string
+          description: Application version
+          example: "1.0.0"
+        storage:
+          type: object
+          properties:
+            type:
+              type: string
+              description: Storage backend type
+              example: "postgres"
+            status:
+              type: string
+              enum: [healthy, unhealthy]
+              description: Storage health status
+              example: "healthy"
+            error:
+              type: string
+              description: Error message if storage is unhealthy
+              example: "connection timeout"
+        uptime:
+          type: string
+          description: How long the application has been running
+          example: "2h30m15s"
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: "Task not found"
+        code:
+          type: string
+          description: Error code for programmatic handling
+          example: "TASK_NOT_FOUND"
+        details:
+          type: object
+          description: Additional error details
+          additionalProperties: true
+
+  responses:
+    BadRequest:
+      description: Bad request - invalid input
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalid_title:
+              summary: Invalid title
+              value:
+                error: "Title is required"
+                code: "VALIDATION_ERROR"
+            invalid_date:
+              summary: Invalid date format
+              value:
+                error: "Invalid date format"
+                code: "VALIDATION_ERROR"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            task_not_found:
+              summary: Task not found
+              value:
+                error: "Task not found"
+                code: "TASK_NOT_FOUND"
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            database_error:
+              summary: Database connection error
+              value:
+                error: "Internal server error"
+                code: "INTERNAL_ERROR"
+
+  parameters:
+    TaskId:
+      name: id
+      in: path
+      required: true
+      description: Unique identifier of the task
+      schema:
+        type: string
+        example: "task-123"
+
+    StatusFilter:
+      name: status
+      in: query
+      description: Filter tasks by completion status
+      required: false
+      schema:
+        type: string
+        enum: [done, undone]
+        example: undone
+
+    LimitParam:
+      name: limit
+      in: query
+      description: Maximum number of items to return
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
+
+    OffsetParam:
+      name: offset
+      in: query
+      description: Number of items to skip
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0

@@ -1,0 +1,135 @@
+version: '3.8'
+
+services:
+  # GoTask Application
+  gotask:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - STORAGE_TYPE=json
+      - STORAGE_FILE_PATH=/app/data/tasks.json
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - mysql
+      - mongodb
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: gotask-postgres
+    environment:
+      POSTGRES_DB: gotask
+      POSTGRES_USER: gotask_user
+      POSTGRES_PASSWORD: gotask_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gotask_user -d gotask"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: gotask-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: gotask
+      MYSQL_USER: gotask_user
+      MYSQL_PASSWORD: gotask_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./scripts/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "gotask_user", "-pgotask_password"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: gotask-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin_password
+      MONGO_INITDB_DATABASE: gotask
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/init.js
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL Admin (pgAdmin)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: gotask-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@gotask.com
+      PGADMIN_DEFAULT_PASSWORD: admin_password
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  # MySQL Admin (phpMyAdmin)
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    container_name: gotask-phpmyadmin
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: gotask_user
+      PMA_PASSWORD: gotask_password
+    ports:
+      - "8081:80"
+    depends_on:
+      - mysql
+    restart: unless-stopped
+
+  # MongoDB Admin (Mongo Express)
+  mongo-express:
+    image: mongo-express:latest
+    container_name: gotask-mongo-express
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: admin
+      ME_CONFIG_MONGODB_ADMINPASSWORD: admin_password
+      ME_CONFIG_MONGODB_URL: mongodb://admin:admin_password@mongodb:27017/
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin_password
+    ports:
+      - "8082:8081"
+    depends_on:
+      - mongodb
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  mysql_data:
+    driver: local
+  mongodb_data:
+    driver: local
+  pgadmin_data:
+    driver: local
